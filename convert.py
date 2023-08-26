@@ -16,6 +16,7 @@
 
 import os
 import glob
+from typing import List, Optional, Tuple
 import bs4
 from bs4 import BeautifulSoup
 from fairseq.checkpoint_utils import load_model_ensemble_and_task_from_hf_hub
@@ -25,16 +26,13 @@ import numpy as np
 import sys
 
 
-# Get the paper ID from the command line. If none is provided work with "Attention is all you need."
-if len(sys.argv) == 1:
-    paper_id = "1706.03762"
-else:
-    paper_id = sys.argv[1]
-
-
-def main():
+def main(arxiv_id: Optional[str] = None, remove_ranges: List[Tuple[int,int]] = []):
+    # For now, expect that arxiv_id is set. In the future, would be nice to support other ways to get papers.
+    assert arxiv_id is not None, "arxiv_id must be set."
+    paper_id = arxiv_id
 
     # Make sure there is a temp directory. Delete it if it exists. Switch into it.
+    # TODO(@gussmith23): Use tempfile.
     if os.path.exists("temp"):
         os.system("rm -rf temp")
     os.mkdir("temp")
@@ -48,27 +46,28 @@ def main():
     try:
         tar_gz_file = glob.glob(f"{paper_id}*.tar.gz")[0]
     except:
-        print(f"Could not find the .tar.gz file for {paper_id}. Maybe the download did not work?")
+        print(
+            f"Could not find the .tar.gz file for {paper_id}. Maybe the download did not work?"
+        )
         exit
 
     # Extract the .tar.gz file to a temp folder.
     os.system(f"tar -xzf {tar_gz_file}")
 
     # Convert to HTML.
-    get_sentences_from_tex()
+    get_sentences_from_tex(paper_id=paper_id, remove_ranges=remove_ranges)
 
     # Go back. Up one level.
     os.chdir("..")
 
     # Convert to wav.
-    convert_sentences_to_wav()
+    convert_sentences_to_wav(paper_id=paper_id)
 
     # Remove temp folder.
     os.system(f"rm -rf temp")
 
 
-def get_sentences_from_tex():
-
+def get_sentences_from_tex(paper_id: str, remove_ranges: List[Tuple[int,int]] = []):
     # Find all the .tex files in the temp folder.
     tex_files = glob.glob(f"*.tex")
 
@@ -80,6 +79,17 @@ def get_sentences_from_tex():
                 documentclass_files.append(tex_file)
     assert len(documentclass_files) == 1, "There should be only one documentclass file."
     documentclass_file = documentclass_files[0]
+
+    # Sort them and reverse them, so that, as we remove lines, we don't change
+    # the lower line numbers. This assumes non-overlapping ranges.
+    remove_ranges = reversed(sorted(remove_ranges, key=lambda x: x[0]))
+
+    for (start, end) in remove_ranges:
+        with open(documentclass_file, "r") as f:
+            lines = f.readlines()
+        lines = lines[:start] + lines[end:]
+        with open(documentclass_file, "w") as f:
+            f.writelines(lines)
 
     # Convert the .tex file to .md file.
     os.system(f"pandoc {documentclass_file} -o {paper_id}.html -t html5")
@@ -124,27 +134,38 @@ def get_sentences_from_tex():
     accumumlated_sentence = ""
     for line in lines:
         if line.startswith("<"):
-
             # Opening tags that we expect.
-            if line.startswith("<p") or line.startswith("<h1") or line.startswith("<h2") or line.startswith("<h3") or line.startswith("<h4"):
+            if (
+                line.startswith("<p")
+                or line.startswith("<h1")
+                or line.startswith("<h2")
+                or line.startswith("<h3")
+                or line.startswith("<h4")
+            ):
                 pass
-            
-            # Closing tags that we expect. 
-            elif line.startswith("</p>") or line.startswith("</h1>") or line.startswith("</h2>") or line.startswith("</h3>") or line.startswith("</h4>"):
+
+            # Closing tags that we expect.
+            elif (
+                line.startswith("</p>")
+                or line.startswith("</h1>")
+                or line.startswith("</h2>")
+                or line.startswith("</h3>")
+                or line.startswith("</h4>")
+            ):
                 accumumlated_sentence = accumumlated_sentence.replace("\n", " ")
-                
+
                 # Split by period so that we can insert a pause.
                 for x in accumumlated_sentence.split("."):
                     sentences.append(x.strip())
                     sentences.append("<PAUSE>")
-                
+
                 # Start over and add pause.
                 accumumlated_sentence = ""
                 sentences.append("<PAUSE>")
-            
+
             else:
                 print(f"Unexpected HTML tag: {line}")
-        
+
         # Accumulate texts.
         else:
             accumumlated_sentence += line
@@ -159,18 +180,16 @@ def get_sentences_from_tex():
     return sentences
 
 
-def convert_sentences_to_wav():
-
+def convert_sentences_to_wav(paper_id: str):
     # Load lines from the .txt file.
     with open(f"temp/{paper_id}_sentences.txt", "r") as f:
         sentences = f.readlines()
-
 
     # Load the model.
     print("Loading TTS model...")
     models, cfg, task = load_model_ensemble_and_task_from_hf_hub(
         "facebook/fastspeech2-en-ljspeech",
-        arg_overrides={"vocoder": "hifigan", "fp16": False}
+        arg_overrides={"vocoder": "hifigan", "fp16": False},
     )
     TTSHubInterface.update_cfg_with_data_cfg(cfg, task.data_cfg)
     generator = task.build_generator(models, cfg)
@@ -180,10 +199,9 @@ def convert_sentences_to_wav():
     full_wave_file = []
     rate = 44100
     for text in sentences:
-        
         text = text.strip()
 
-        print(f"Text: \"{text}\"")
+        print(f'Text: "{text}"')
         if text == "":
             continue
 
@@ -195,7 +213,7 @@ def convert_sentences_to_wav():
         # Create the sample.
         sample = TTSHubInterface.get_model_input(task, text)
         wav, rate = TTSHubInterface.get_prediction(task, models[0], generator, sample)
-        
+
         # Map wav from torch tensor to numpy array.
         wav = wav.numpy()
 
@@ -205,7 +223,7 @@ def convert_sentences_to_wav():
     # Convert to numpy.
     full_wave_file = np.array(full_wave_file, dtype=np.float32)
 
-    # Save the generated audio to a file. 
+    # Save the generated audio to a file.
     wav_path = f"{paper_id}.wav"
     print(f"Saving {wav_path}")
     scipy.io.wavfile.write(wav_path, rate, full_wave_file)
@@ -214,4 +232,33 @@ def convert_sentences_to_wav():
 
 # Call the main method.
 if __name__ == "__main__":
-    main()
+    import argparse
+    import ast
+
+    parser = argparse.ArgumentParser(description="Convert a paper to audio.")
+    parser.add_argument(
+        "--arxiv_id",
+        type=str,
+        # TODO(@gussmith23): In the future, it would be nice to support papers
+        # from other sources.
+        required=True,
+        help="The arxiv ID of the paper to convert.",
+    )
+    parser.add_argument(
+        "--remove_ranges",
+        type=str,
+        default="[]",
+        help=(
+            "Remove lines from LaTeX source. This is the easiest way to get"
+            " around https://github.com/jgm/pandoc/issues/4746. Expects a list"
+            ' of pairs "[(start0,end0), (start1,end1), ...]". Will remove'
+            " lines from startn to endn-1 (Python half-open range style) for"
+            " each (start,end) pair. Assumes ranges are"
+            " non-overlapping; things will break if this is not the case!"
+            " Only removes lines from the top-level file."
+        ),
+    )
+
+    args = parser.parse_args()
+
+    main(arxiv_id=args.arxiv_id, remove_ranges=ast.literal_eval(args.remove_ranges))
