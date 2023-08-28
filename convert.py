@@ -282,8 +282,6 @@ def convert_with_papertohtml(url: str, output_filepath: str):
     sentences= _clean_html(str(soup), id="tmp")
     convert_sentences_to_wav(sentences=sentences, output_filepath=output_filepath)
 
-    exit(0)
-
 
 # Call the main method.
 if __name__ == "__main__":
