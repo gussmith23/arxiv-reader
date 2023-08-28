@@ -246,6 +246,10 @@ def convert_sentences_to_wav(paper_id: str):
     scipy.io.wavfile.write(wav_path, rate, full_wave_file)
     print("Done.")
 
+    print("Converting to mp3...")
+    os.system(f"ffmpeg -y -i {wav_path} {paper_id}.mp3")
+    print("Done.")
+
 
 # Call the main method.
 if __name__ == "__main__":
