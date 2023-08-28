@@ -338,6 +338,7 @@ if __name__ == "__main__":
     ), "One of --arxiv_id or --paper_url is required."
 
     output_filepath = Path(args.output_filepath).absolute()
+    print(f"Output filepath: {output_filepath}")
 
     if args.arxiv_id is not None:
         main(arxiv_id=args.arxiv_id, remove_ranges=ast.literal_eval(args.remove_ranges), output_filepath=output_filepath)
