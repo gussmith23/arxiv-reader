@@ -120,6 +120,19 @@ def get_sentences_from_tex(paper_id: str, remove_ranges: List[Tuple[int,int]] = 
         element.decompose()
     for element in soup.find_all("figure"):
         element.decompose()
+    for element in soup.find_all("table"):
+        element.decompose()
+    for element in soup.find_all("table*"):
+        element.decompose()
+    for element in soup.find_all("div", class_="description"):
+        element.decompose()
+    for element in soup.find_all("tbody"):
+        element.decompose()
+
+    # Elements to unwrap (i.e. remove the tag, but keep the contents).
+    for tag in ["span", "strong", "em", "i", "b", "li", "code", "ul", "ol"]:
+        for element in soup.find_all(tag):
+            element.unwrap()
 
     # Write the .html file back.
     with open(f"{paper_id}_cleaned.html", "w") as f:
@@ -153,6 +166,10 @@ def get_sentences_from_tex(paper_id: str, remove_ranges: List[Tuple[int,int]] = 
                 or line.startswith("</h4>")
             ):
                 accumumlated_sentence = accumumlated_sentence.replace("\n", " ")
+
+                # Add spaces around hyphens. We could also delete them entirely.
+                # They're pronounced very strangely by the model.
+                accumumlated_sentence = accumumlated_sentence.replace("-", " - ")
 
                 # Split by period so that we can insert a pause.
                 for x in accumumlated_sentence.split("."):
