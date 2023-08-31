@@ -14,6 +14,7 @@
 
 # Lint as: python3
 
+import logging
 import os
 import glob
 from pathlib import Path
@@ -29,7 +30,11 @@ import numpy as np
 import sys
 
 
-def main(output_filepath: str,arxiv_id: Optional[str] = None, remove_ranges: List[Tuple[int, int]] = []):
+def main(
+    output_filepath: str,
+    arxiv_id: Optional[str] = None,
+    remove_ranges: List[Tuple[int, int]] = [],
+):
     # For now, expect that arxiv_id is set. In the future, would be nice to support other ways to get papers.
     assert arxiv_id is not None, "arxiv_id must be set."
     paper_id = arxiv_id
@@ -37,25 +42,25 @@ def main(output_filepath: str,arxiv_id: Optional[str] = None, remove_ranges: Lis
     # Make sure there is a temp directory. Delete it if it exists. Switch into it.
     # TODO(@gussmith23): Use tempfile.
     if os.path.exists("temp"):
-        os.system("rm -rf temp")
+        assert os.system("rm -rf temp") == 0
     os.mkdir("temp")
     os.chdir("temp")
 
     # Download the paper as .tar.gz
-    print(f"Downloading paper {paper_id}...")
-    os.system(f"arxiv-downloader --id {paper_id} --source")
+    logging.info(f"Downloading paper {paper_id}...")
+    assert os.system(f"arxiv-downloader --id {paper_id} --source") == 0
 
     # Find the .tar.gz file.
     try:
         tar_gz_file = glob.glob(f"{paper_id}*.tar.gz")[0]
     except:
-        print(
+        logging.error(
             f"Could not find the .tar.gz file for {paper_id}. Maybe the download did not work?"
         )
         exit
 
     # Extract the .tar.gz file to a temp folder.
-    os.system(f"tar -xzf {tar_gz_file}")
+    assert os.system(f"tar -xzf {tar_gz_file}") == 0
 
     # Convert to HTML.
     sentences = get_sentences_from_tex(paper_id=paper_id, remove_ranges=remove_ranges)
@@ -67,7 +72,7 @@ def main(output_filepath: str,arxiv_id: Optional[str] = None, remove_ranges: Lis
     convert_sentences_to_wav(sentences=sentences, output_filepath=output_filepath)
 
     # Remove temp folder.
-    os.system(f"rm -rf temp")
+    assert os.system(f"rm -rf temp") == 0
 
 
 def get_sentences_from_tex(paper_id: str, remove_ranges: List[Tuple[int, int]] = []):
@@ -95,7 +100,7 @@ def get_sentences_from_tex(paper_id: str, remove_ranges: List[Tuple[int, int]] =
             f.writelines(lines)
 
     # Convert the .tex file to .md file.
-    os.system(f"pandoc {documentclass_file} -o {paper_id}.html -t html5")
+    assert os.system(f"pandoc {documentclass_file} -o {paper_id}.html -t html5") == 0
 
     # Load the .html file with BeautifulSoup4.
     with open(f"{paper_id}.html", "r") as f:
@@ -200,7 +205,7 @@ def _clean_html(html, id: str):
                 sentences.append("<PAUSE>")
 
             else:
-                print(f"Unexpected HTML tag: {line}")
+                logging.warning(f"Unexpected HTML tag: {line}")
 
         # Accumulate texts.
         else:
@@ -217,9 +222,8 @@ def _clean_html(html, id: str):
 
 
 def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
-
     # Load the model.
-    print("Loading TTS model...")
+    logging.info("Loading TTS model...")
     models, cfg, task = load_model_ensemble_and_task_from_hf_hub(
         "facebook/fastspeech2-en-ljspeech",
         arg_overrides={"vocoder": "hifigan", "fp16": False},
@@ -228,13 +232,13 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
     generator = task.build_generator(models, cfg)
 
     # Generate line by line.
-    print("Generating...")
+    logging.info("Generating...")
     full_wave_file = []
     rate = 44100
     for text in sentences:
         text = text.strip()
 
-        print(f'Text: "{text}"')
+        logging.info(f'Text: "{text}"')
         if text == "":
             continue
 
@@ -259,27 +263,29 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
     # Save the generated audio to a file.
     wav_file = tempfile.NamedTemporaryFile(suffix=".wav")
     wav_path = wav_file.name
-    print(f"Saving {wav_path}")
+    logging.info(f"Saving {wav_path}")
     scipy.io.wavfile.write(wav_path, rate, full_wave_file)
-    print("Done.")
+    logging.info("Done.")
 
-    print("Converting to mp3...")
-    os.system(f"ffmpeg -y -i {wav_path} {output_filepath}")
-    print("Done.")
+    logging.info("Converting to mp3...")
+    assert os.system(f"ffmpeg -y -i {wav_path} {output_filepath}") == 0
+    logging.info("Done.")
 
 
 def convert_with_papertohtml(url: str, output_filepath: str):
     downloaded = tempfile.NamedTemporaryFile(suffix=".pdf")
-    print(f"Downloading paper {url}...")
-    os.system(f"wget {url} -O {downloaded.name}")
+    logging.info(f"Downloading paper {url}...")
+    assert os.system(f"wget {url} -O {downloaded.name}") == 0, "PDF download failed."
     response = requests.post(
         "https://papertohtml.org/upload", files={"file": open(downloaded.name, "rb")}
     )
 
     soup = BeautifulSoup(response.text, "html.parser")
-    assert len(soup.find_all("div", class_="paper__text")) == 1, "There should be only one div.paper__text tag."
+    assert (
+        len(soup.find_all("div", class_="paper__text")) == 1
+    ), "There should be only one div.paper__text tag."
     soup = soup.find_all("div", class_="paper__text")[0]
-    sentences= _clean_html(str(soup), id="tmp")
+    sentences = _clean_html(str(soup), id="tmp")
     convert_sentences_to_wav(sentences=sentences, output_filepath=output_filepath)
 
 
@@ -313,7 +319,7 @@ if __name__ == "__main__":
         "--output_filepath",
         type=str,
         required=True,
-        help="Path of the output MP3 file."
+        help="Path of the output MP3 file.",
     )
     parser.add_argument(
         "--remove_ranges",
@@ -330,6 +336,16 @@ if __name__ == "__main__":
             " Only applies to --arxiv_id."
         ),
     )
+    parser.add_argument(
+        "--log_level",
+        help="Log level. Accepts values accepted by Python's logging module.",
+        type=str,
+        default="INFO",
+    )
+    args = parser.parse_args()
+
+    # Set up logging.
+    logging.basicConfig(level=logging.getLevelName(args.log_level))
 
     args = parser.parse_args()
 
@@ -338,10 +354,14 @@ if __name__ == "__main__":
     ), "One of --arxiv_id or --paper_url is required."
 
     output_filepath = Path(args.output_filepath).absolute()
-    print(f"Output filepath: {output_filepath}")
+    logging.info(f"Output filepath: {output_filepath}")
 
     if args.arxiv_id is not None:
-        main(arxiv_id=args.arxiv_id, remove_ranges=ast.literal_eval(args.remove_ranges), output_filepath=output_filepath)
+        main(
+            arxiv_id=args.arxiv_id,
+            remove_ranges=ast.literal_eval(args.remove_ranges),
+            output_filepath=output_filepath,
+        )
 
     if args.paper_url is not None:
         convert_with_papertohtml(args.paper_url, output_filepath=output_filepath)
