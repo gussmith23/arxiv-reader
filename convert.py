@@ -238,10 +238,6 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
     for text in sentences:
         text = text.strip()
 
-        # Filter out some weird characters we've encountered that cause
-        # problems.
-        text = text.replace("•", "")
-
         logging.info(f'Text: "{text}"')
         if text == "":
             continue
@@ -253,7 +249,12 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
 
         # Create the sample.
         sample = TTSHubInterface.get_model_input(task, text)
-        wav, rate = TTSHubInterface.get_prediction(task, models[0], generator, sample)
+        try:
+            wav, rate = TTSHubInterface.get_prediction(task, models[0], generator, sample)
+        except RuntimeError as e:
+            logging.error(f"RuntimeError: {e}")
+            logging.error(f"Skipping sentence: {text}")
+            continue
 
         # Map wav from torch tensor to numpy array.
         wav = wav.numpy()
