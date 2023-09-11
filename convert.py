@@ -252,6 +252,9 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
         try:
             wav, rate = TTSHubInterface.get_prediction(task, models[0], generator, sample)
         except RuntimeError as e:
+            # I think RuntimeErrors should only come from "weird" sentences,
+            # e.g. the sentence containing only ")", which can't be turned into
+            # audio. It should be fine to skip these.
             logging.error(f"RuntimeError: {e}")
             logging.error(f"Skipping sentence: {text}")
             continue
