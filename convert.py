@@ -238,6 +238,10 @@ def convert_sentences_to_wav(sentences: List[str], output_filepath: str):
     for text in sentences:
         text = text.strip()
 
+        # Filter out some weird characters we've encountered that cause
+        # problems.
+        text = text.replace("•", "")
+
         logging.info(f'Text: "{text}"')
         if text == "":
             continue
